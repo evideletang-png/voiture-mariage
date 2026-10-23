@@ -152,7 +152,7 @@
     const st = {
       lang: null, encrypted: null, values: null,
       shots: { recto: '', verso: '' },         // photos : en mémoire, jamais envoyées sauf case cochée
-      text: { recto: '', verso: '' },          // texte lu sur chaque face
+      text: { recto: null, verso: null },      // texte lu sur chaque face (null : pas encore lu)
       prefilled: new Set(),                    // champs remplis par une lecture, tant que l'invité n'y a pas touché
       attach: false,
       phoneTouched: false, licTouched: false, boxTouched: false, step: 0,
@@ -436,27 +436,41 @@
       const shown = (key, value) => (key === 'numero' ? value : App.fmtDate(App.dt(value)));
       const addTag = (field, content) => { clearTag(field); field.tag = h('span', { class: 'scan-tag' }, ...content); field.el.append(field.tag); };
 
-      /** Reporte ce qui a été lu : remplit les champs vides, propose (sans écraser) quand l'invité a déjà saisi autre chose. */
+      // « Utiliser » : l'invité a tranché, une lecture ultérieure ne retirera plus cette valeur
+      const useButton = (field, r) => h('button', { type: 'button', class: 'link', onclick: () => {
+        field.input.value = r.value;
+        st.prefilled.delete(field.input.name);
+        addTag(field, [t('scanRead')]);
+      } }, t('scanUse'));
+
+      /**
+       * Reporte ce qui a été lu : remplit les champs vides, propose (sans écraser) quand l'invité a déjà saisi autre chose.
+       * Une date de carte du modèle européen (champ 4a) n'est que proposée : la date d'obtention est au verso.
+       */
       function applyScan(parsed) {
         let n = 0;
+        let suggested = 0;
         for (const [key, field] of licFields) {
           const r = parsed[key];
           clearTag(field);
-          if (!r) continue;
           const input = field.input;
-          if (!input.value || st.prefilled.has(input.name)) {
+          // une valeur remplie par une lecture précédente que celle-ci ne confirme plus (autre pays, autre photo) est retirée
+          if (st.prefilled.has(input.name) && (!r || r.ask)) { input.value = ''; st.prefilled.delete(input.name); }
+          if (!r) continue;
+          if (r.ask) {
+            if (!input.value) {
+              suggested++;
+              addTag(field, [t('scanCardEu', { value: shown(key, r.value) }), ' ', useButton(field, r)]);
+              field.tag.classList.add('diff');
+            }
+          } else if (!input.value || st.prefilled.has(input.name)) {
             input.value = r.value;
             st.prefilled.add(input.name);
             n++;
-            addTag(field, [t('scanRead') + (r.conf === 'low' ? ` · ${t('scanLow')}` : '')]);
+            addTag(field, [r.from === 'card' ? t('scanCardNa') : t('scanRead') + (r.conf === 'low' ? ` · ${t('scanLow')}` : '')]);
             if (r.conf === 'low') field.tag.classList.add('low');
           } else if (input.value !== r.value) {
-            addTag(field, [t('scanDiffers', { value: shown(key, r.value) }), ' ',
-              h('button', { type: 'button', class: 'link', onclick: () => {
-                input.value = r.value;
-                st.prefilled.add(input.name);
-                addTag(field, [t('scanRead')]);
-              } }, t('scanUse'))]);
+            addTag(field, [t('scanDiffers', { value: shown(key, r.value) }), ' ', useButton(field, r)]);
             field.tag.classList.add('diff');
           }
         }
@@ -465,9 +479,49 @@
         const warns = [];
         if (same.nom === false) warns.push(t('scanNameDiffers', { value: parsed.nom.value }));
         if (same.naissance === false) warns.push(t('scanBirthDiffers', { value: App.fmtDate(App.dt(parsed.naissance.value)) }));
-        scanStatus.replaceChildren(
-          h('p', { class: 'hint' + (n ? ' ok' : ' warn') }, n ? t('scanDone', { n }) : t('scanNothing')),
-          ...warns.map((w) => h('p', { class: 'hint warn' }, w)));
+        const lines = [];
+        if (n || !suggested) lines.push(h('p', { class: 'hint' + (n ? ' ok' : ' warn') }, n ? t('scanDone', { n }) : t('scanNothing')));
+        if (suggested) lines.push(h('p', { class: 'hint ok' }, t('scanSuggested')));
+        scanStatus.replaceChildren(...lines, ...warns.map((w) => h('p', { class: 'hint warn' }, w)));
+      }
+
+      /**
+       * Lit les photos pas encore lues, selon le modèle du permis choisi plus bas (européen, américain, autre), puis
+       * reporte ce qui a été trouvé. Relancée quand l'invité change le pays du permis : le texte déjà lu est réutilisé.
+       */
+      const scanUis = {};
+      let reading = false;
+      let readAgain = false;
+      async function readShots() {
+        if (reading) { readAgain = true; return; }
+        reading = true;
+        try {
+          do {
+            readAgain = false;
+            if (!st.shots.recto && !st.shots.verso) break;
+            const iso = licCountrySel.value;
+            const fam = iso ? App.licenceFamily(iso) : '';
+            if (fam !== 'eu' && fam !== 'na') {
+              scanStatus.replaceChildren(h('p', { class: 'hint warn' }, t(fam ? 'scanOther' : 'scanPickCountry')));
+              continue;
+            }
+            for (const side of ['recto', 'verso']) {
+              if (!st.shots[side] || st.text[side] !== null) continue;
+              const ui = scanUis[side];
+              try {
+                st.text[side] = await App.scanImage(st.shots[side], (p) => ui.setState(`${p.phase === 'engine' ? t('scanEngine') : t('scanReading')} ${p.pct} %`));
+              } catch (e) {
+                scanStatus.replaceChildren(h('p', { class: 'hint warn' }, t('scanFail')));
+                return;
+              } finally {
+                ui.setState('');
+              }
+            }
+            applyScan(App.parseLicence({ front: st.text.recto || '', back: st.text.verso || '' }, { family: fam, country: iso }));
+          } while (readAgain);
+        } finally {
+          reading = false;
+        }
       }
 
       async function handleFile(side, file, ui) {
@@ -482,16 +536,11 @@
           return;
         }
         st.shots[side] = shot;
+        st.text[side] = null; // nouvelle photo : à relire
         ui.showThumb(shot);
+        ui.setState('');
         scanStatus.replaceChildren();
-        try {
-          st.text[side] = await App.scanImage(shot, (p) => ui.setState(`${p.phase === 'engine' ? t('scanEngine') : t('scanReading')} ${p.pct} %`));
-          ui.setState('');
-          applyScan(App.parseLicence({ front: st.text.recto, back: st.text.verso }));
-        } catch (e) {
-          ui.setState('');
-          scanStatus.replaceChildren(h('p', { class: 'hint warn' }, t('scanFail')));
-        }
+        readShots();
       }
 
       function scanCard(side, label) {
@@ -512,6 +561,7 @@
         camera.addEventListener('change', onPick);
         picker.addEventListener('change', onPick);
         if (st.shots[side]) ui.showThumb(st.shots[side]);
+        scanUis[side] = ui;
         return card;
       }
 
@@ -602,12 +652,12 @@
         applyBox();
         if (!c) return;
         if (!st.phoneTouched) { dialSel.value = c; refreshDial(); updatePhoneHint(false); }
-        if (!st.licTouched) { licCountrySel.value = c; applyLicence(c); }
+        if (!st.licTouched) { licCountrySel.value = c; applyLicence(c); readShots(); }
         if (!st.boxTouched) boxSel.value = AUTOMATIC.has(c) ? 'auto' : 'manuelle';
       }
       countrySel.addEventListener('change', syncCountry);
       dialSel.addEventListener('change', () => { st.phoneTouched = true; refreshDial(); updatePhoneHint(false); });
-      licCountrySel.addEventListener('change', () => { st.licTouched = true; applyLicence(licCountrySel.value); });
+      licCountrySel.addEventListener('change', () => { st.licTouched = true; applyLicence(licCountrySel.value); readShots(); });
 
       /* --- envoi --- */
 
