@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <!-- Rien ne peut sortir de la page : pas de fetch, pas de script externe, pas d'image distante. -->
+  <meta http-equiv="Content-Security-Policy"
+        content="default-src 'none'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self'; style-src 'self'; img-src 'self' data: blob:; font-src 'self'; connect-src 'self' https://data.geopf.fr https://photon.komoot.io; form-action 'none'; base-uri 'none'">
+  <meta name="referrer" content="no-referrer">
+  <meta name="robots" content="noindex,nofollow">
+  <title>Voiture de mariage</title>
+  <meta name="theme-color" content="#d0a113">
+  <link rel="icon" type="image/svg+xml" href="icone.svg">
+  <link rel="preload" href="fonts/inter-latin-wght-normal.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="preload" href="fonts/cormorant-garamond-latin-300-normal.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div id="app"></div>
+  <div id="toast" role="status" aria-live="polite"></div>
+  <noscript><p class="wrap">Cette page a besoin de JavaScript : le chiffrement se fait dans votre navigateur.</p></noscript>
+
+  <script src="vault.js"></script>
+  <script src="ui.js"></script>
+  <script src="carte.js"></script>
+  <script src="contact.js"></script>
+  <script src="address.js"></script>
+  <script src="licence.js"></script>
+  <script src="scan.js"></script>
+  <script src="cars.js"></script>
+  <script src="i18n.js"></script>
+  <script src="estimate.js"></script>
+  <script src="programme.js"></script>
+  <script src="guest.js"></script>
+  <script src="organizer.js"></script>
+  <script src="export.js"></script>
+  <script src="main.js"></script>
+</body>
+</html>

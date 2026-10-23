@@ -1,0 +1,12 @@
+# Jamais dans le dépôt : fichier de clé de l'organisateur (contient le mot de passe d'accès et la clé publique),
+# dossiers invités déchiffrés ou chiffrés, exports
+cle-organisateur-*.json
+mariage-*.txt
+dossier-*.txt
+*.zip
+*.csv
+
+# poste de travail
+.DS_Store
+.claude/
+node_modules/

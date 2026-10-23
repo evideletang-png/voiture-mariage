@@ -1,0 +1,8 @@
+Lecture du permis sur l'appareil (aucune donnée n'est envoyée).
+
+- tesseract.min.js, worker.min.js : Tesseract.js 7.0.0 (Apache-2.0)
+- core/ : tesseract.js-core 7.0.0 (Apache-2.0), moteur Tesseract compilé en WebAssembly.
+  Le navigateur choisit seul la variante adaptée (relaxedsimd, simd ou standard).
+- lang/fra.traineddata.gz : modèle « 4.0.0_best_int » de @tesseract.js-data/fra 1.0.0 (MIT, données Tesseract sous Apache-2.0)
+
+Ces fichiers ne sont chargés qu'au premier scan d'un permis.
