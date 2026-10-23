@@ -798,7 +798,7 @@
 
       intro.append(
         App.hero({ big: true, eyebrow: 'Benvenuti in Corsica', title: cfg.nom, lead: t('lead') }),
-        programmeBlock(st.lang, false),
+        programmeBlock(st.lang, false) || '', // append(null) écrirait « null » dans la page
         h('div', { class: 'callout' },
           h('strong', {}, t('privacyLead')), t('privacyBody', { org: orgName }), cfg.adresseAuto ? ' ' + t('privacyAddr') : '',
           h('details', {},
