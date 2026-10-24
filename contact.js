@@ -114,9 +114,81 @@
   }
   App.splitInternational = splitInternational;
 
+  /* Espacement des chiffres, comme on écrit les numéros dans chaque pays. Tailles des groupes du numéro national (sans le 0
+   * de tête), le dernier groupe absorbant ce qui dépasse. Un pays absent de la table : groupes de 3. */
+  const GROUPS = {
+    FR: () => [1, 2, 2, 2, 2],
+    GB: (d) => (d[0] === '2' ? [2, 4, 4] : [4, 6]),
+    DE: () => [3, 8],
+    AT: () => [3, 7],
+    CH: () => [2, 3, 2, 2],
+    IT: (d) => (d[0] === '3' ? [3, 3, 4] : /^0[26]/.test(d) ? [2, 8] : [3, 7]), // le 0 d'un fixe fait partie du numéro
+    ES: () => [3, 2, 2, 2],
+    PT: () => [3, 3, 3],
+    BE: (d) => (d[0] === '4' ? [3, 2, 2, 2] : [1, 3, 2, 2]),
+    NL: (d) => (d[0] === '6' ? [1, 8] : [2, 7]),
+    LU: () => [3, 3, 3],
+    IE: () => [2, 3, 4],
+    AU: (d) => (d[0] === '4' ? [3, 3, 3] : [1, 4, 4]),
+    DK: () => [2, 2, 2, 2],
+    SE: () => [2, 3, 2, 2],
+    NO: () => [3, 2, 3],
+    PL: () => [3, 3, 3],
+    US: () => [3, 3, 4],
+  };
+  GROUPS.CA = GROUPS.US;
+  // pays où l'on écrit encore le 0 de tête en national (06 74…, 0151…, 079…) : il est affiché si l'invité l'a tapé
+  const TRUNK_ZERO = new Set(['FR', 'GB', 'DE', 'AT', 'CH', 'BE', 'NL', 'IE', 'AU', 'SE']);
+  // exemples affichés en grisé dans le champ : le format attendu se voit sans lire de consigne
+  const PHONE_EXAMPLE = {
+    FR: '0612345678', GB: '07911123456', DE: '015112345678', AT: '06641234567', CH: '0791234567', IT: '3331234567',
+    ES: '612345678', PT: '912345678', BE: '0470123456', NL: '0612345678', LU: '621123456', IE: '0851234567',
+    AU: '0412345678', US: '4155550100', CA: '6045550100',
+  };
+
+  const chunk = (digits, sizes) => {
+    const out = [];
+    let at = 0;
+    sizes.forEach((n, i) => {
+      if (at >= digits.length) return;
+      out.push(digits.slice(at, i === sizes.length - 1 ? undefined : at + n));
+      at += n;
+    });
+    return out;
+  };
+  const genericSizes = (len) => {
+    const sizes = [];
+    for (let left = len; left > 0; left -= 3) sizes.push(left <= 4 ? left : 3);
+    return sizes.length ? sizes : [0];
+  };
+  const sizesFor = (iso, national) => (GROUPS[iso] ? GROUPS[iso](national) : genericSizes(national.length));
+
+  /** Chiffres du numéro national (sans indicatif ni 0 de tête) -> '6 74 69 44 82'. Sert au format international. */
+  App.groupPhone = (iso, national) => chunk(String(national), sizesFor(iso, String(national))).join(' ');
+
+  const nanp = (d) => (d.length <= 3 ? `(${d}` : d.length <= 6 ? `(${d.slice(0, 3)}) ${d.slice(3)}` : `(${d.slice(0, 3)}) ${d.slice(3, 6)}-${d.slice(6)}`);
+
+  /**
+   * Ce que l'invité tape -> le même numéro espacé à la mode du pays, au fil de la frappe : '0674694482' -> '06 74 69 44 82',
+   * '4155550100' -> '(415) 555-0100'. Sans zéro de tête tapé, on n'en ajoute pas. Jamais d'espace en fin de chaîne.
+   */
+  App.formatNationalInput = (iso, raw) => {
+    const digits = String(raw || '').replace(/\D/g, '').slice(0, 15);
+    if (!digits) return '';
+    if (DIAL[iso] === '1') return digits[0] === '1' ? (digits.length > 1 ? `1 ${nanp(digits.slice(1))}` : '1') : nanp(digits);
+    const trunk = digits[0] === '0' && !KEEP_ZERO.has(iso);
+    const national = trunk ? digits.slice(1) : digits;
+    const parts = chunk(national, sizesFor(iso, national));
+    if (trunk) parts[0] = '0' + (parts[0] || '');
+    return parts.join(' ');
+  };
+  /** Même mise en forme pour un numéro national déjà extrait (+39 333… tapé en international) : le 0 de tête est remis là où on l'écrit. */
+  App.formatNational = (iso, national) => App.formatNationalInput(iso, (TRUNK_ZERO.has(iso) ? '0' : '') + national);
+  App.phoneExample = (iso) => (PHONE_EXAMPLE[iso] ? App.formatNationalInput(iso, PHONE_EXAMPLE[iso]) : '');
+
   /**
    * Normalise un numéro saisi avec le pays choisi.
-   * Accepte « 06 74… », « +33 6 74… » ou « 0033 6 74… ». Renvoie { ok, tel: '+33 674694482', iso }.
+   * Accepte « 06 74… », « +33 6 74… » ou « 0033 6 74… ». Renvoie { ok, tel: '+33 6 74 69 44 82', iso }.
    */
   App.normalizePhone = (iso, input) => {
     const raw = String(input || '').trim();
@@ -129,13 +201,14 @@
       if (!hit) return { ok: false };
       ({ dial, iso: country } = hit);
       digits = hit.national;
+      if (digits[0] === '0' && !KEEP_ZERO.has(country)) digits = digits.slice(1); // « +33 (0)6 74… » : le 0 entre parenthèses est de trop
     } else {
       if (!dial) return { ok: false };
       if (dial === '1' && digits.length === 11 && digits[0] === '1') digits = digits.slice(1);
       else if (digits[0] === '0' && !KEEP_ZERO.has(iso)) digits = digits.slice(1);
     }
     const ok = digits.length >= 4 && dial.length + digits.length <= 15;
-    return { ok, tel: ok ? `+${dial} ${digits}` : '', iso: country };
+    return { ok, tel: ok ? `+${dial} ${App.groupPhone(country, digits)}` : '', iso: country };
   };
 
   /* ----- e-mail ----- */

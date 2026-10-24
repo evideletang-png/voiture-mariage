@@ -245,10 +245,14 @@
       const dialFlag = h('span', { class: 'flag' });
       const dialCode = h('span', { class: 'code' });
       const dialFace = h('span', { class: 'dial-face', 'aria-hidden': 'true' }, dialFlag, dialCode, h('span', { class: 'chev' }, '▾'));
+      const isInternational = (v) => /^\s*(\+|00)/.test(v);
       const refreshDial = () => {
         const c = dialSel.value;
         dialFlag.textContent = c ? App.flag(c) : '';
         dialCode.textContent = c ? `+${App.DIAL[c]}` : '';
+        tel.placeholder = c ? App.phoneExample(c) : '';
+        // le pays change : les chiffres déjà tapés sont regroupés à la mode du nouveau pays
+        if (c && tel.value && !isInternational(tel.value)) tel.value = App.formatNationalInput(c, tel.value);
       };
       const tel = h('input', { type: 'tel', name: 'tel', id: 'f-tel', required: true, inputmode: 'tel', autocomplete: 'tel-national',
         enterkeyhint: 'next', maxlength: 24, autocorrect: 'off' });
@@ -263,15 +267,29 @@
         if (r.ok) telHint.textContent = `✓ ${r.tel}`;
         else if (final) { telHint.textContent = t('errPhone'); telHint.classList.add('warn'); }
       };
-      tel.addEventListener('input', () => updatePhoneHint(false));
+      // les chiffres se regroupent au fil de la frappe (06 74 69 44 82, (415) 555-0100) ; le curseur reste derrière le même chiffre
+      tel.addEventListener('input', () => {
+        const v = tel.value;
+        if (!isInternational(v)) {
+          const formatted = App.formatNationalInput(dialSel.value, v);
+          if (formatted !== v) {
+            const digitsBefore = v.slice(0, tel.selectionStart).replace(/\D/g, '').length;
+            tel.value = formatted;
+            let pos = 0;
+            for (let seen = 0; pos < formatted.length && seen < digitsBefore; pos++) if (/\d/.test(formatted[pos])) seen++;
+            try { tel.setSelectionRange(pos, pos); } catch (e) { /* champ non sélectionnable : le curseur reste en fin */ }
+          }
+        }
+        updatePhoneHint(false);
+      });
       // un numéro tapé en +39… ou 0039… bascule l'indicatif tout seul
       tel.addEventListener('change', () => {
-        if (/^\s*(\+|00)/.test(tel.value)) {
+        if (isInternational(tel.value)) {
           const r = App.normalizePhone(dialSel.value, tel.value);
           if (r.ok && App.DIAL[r.iso]) {
             dialSel.value = r.iso;
             refreshDial();
-            tel.value = r.tel.split(' ').slice(1).join(' ');
+            tel.value = App.formatNational(r.iso, r.tel.replace(/\D/g, '').slice(App.DIAL[r.iso].length));
             st.phoneTouched = true;
           }
         }
