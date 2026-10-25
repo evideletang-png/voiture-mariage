@@ -19,6 +19,8 @@
     filter: '',
     onlyAlerts: false,
     noStorage: false,
+    collecte: { vus: {} },  // dépôts du service déjà récupérés : id -> clé locale (null = illisible). Rien de personnel.
+    sync: { busy: false, started: false, last: 0, remote: null, error: '' },
   });
 
   const mem = new Map(); // enveloppes si IndexedDB est indisponible (navigation privée)
@@ -61,6 +63,7 @@
     state.guests = [];
     state.assign = {};
     state.stage = null;
+    state.sync = { busy: false, started: false, last: 0, remote: null, error: '' };
     document.querySelectorAll('dialog').forEach((d) => d.remove()); // une fiche ouverte ne doit pas survivre au verrouillage
     render();
   }
@@ -265,31 +268,119 @@
     state.badEnvelopes = bad;
   }
 
+  /** Vérifie qu'une enveloppe s'ouvre avec notre clé et la range. { result: 'new' | 'dup' | 'bad', key }. `existing` : clés déjà rangées. */
+  async function ingestEnvelope(env, existing) {
+    try {
+      await Vault.decryptEnvelope(state.priv, state.org.publicKey, env);
+      const key = Vault.toB64u(await crypto.subtle.digest('SHA-256', Vault.fromB64u(env.ct)));
+      if (existing.has(key)) return { result: 'dup', key };
+      await envPut(key, { app: env.app, v: env.v, kid: env.kid, epk: env.epk, iv: env.iv, ct: env.ct });
+      existing.add(key);
+      return { result: 'new', key };
+    } catch (e) {
+      return { result: 'bad', key: null };
+    }
+  }
+
+  /** Nouveaux invités et mises à jour entre deux états de la liste. */
+  function diffGuests(before) {
+    return {
+      fresh: state.guests.filter((g) => !before.has(g.gk)).length,
+      updated: state.guests.filter((g) => before.has(g.gk) && before.get(g.gk) !== g.submittedAt).length,
+    };
+  }
+
   async function importFiles(files) {
     const before = new Map(state.guests.map((g) => [g.gk, g.submittedAt]));
     const existing = new Set((await envAll()).map((r) => r.key));
     let dup = 0, bad = 0;
     for (const f of files) {
+      let env;
       try {
         if (f.size > 12e6) throw new Error('TOO_BIG');
-        const env = JSON.parse(await f.text());
-        await Vault.decryptEnvelope(state.priv, state.org.publicKey, env);
-        const key = Vault.toB64u(await crypto.subtle.digest('SHA-256', Vault.fromB64u(env.ct)));
-        if (existing.has(key)) { dup++; continue; }
-        await envPut(key, { app: env.app, v: env.v, kid: env.kid, epk: env.epk, iv: env.iv, ct: env.ct });
-        existing.add(key);
-      } catch (e) { bad++; }
+        env = JSON.parse(await f.text());
+      } catch (e) { bad++; continue; }
+      const r = await ingestEnvelope(env, existing);
+      if (r.result === 'dup') dup++; else if (r.result === 'bad') bad++;
     }
     await loadGuests();
-    const fresh = state.guests.filter((g) => !before.has(g.gk)).length;
-    const updated = state.guests.filter((g) => before.has(g.gk) && before.get(g.gk) !== g.submittedAt).length;
+    const { fresh, updated } = diffGuests(before);
     App.toast(`${fresh} nouveau(x) · ${updated} mis à jour · ${dup} déjà importé(s) · ${bad} illisible(s)`);
     state.tab = 'invites';
     render();
   }
 
+  /* ---------- collecte automatique : récupération des dossiers déposés sur le service ---------- */
+
+  const collecteOn = () => !!(state.org && state.org.config.collecte && state.org.config.collecteJeton);
+  const collecteArgs = () => [state.org.config.collecte, state.org.config.collecteJeton];
+
+  /** Va chercher les dépôts que cette machine n'a pas encore vus, les déchiffre en mémoire et les range comme des fichiers importés. */
+  async function syncCollecte({ quiet = false } = {}) {
+    if (!collecteOn() || !state.priv || state.sync.busy) return;
+    const [base, token] = collecteArgs();
+    state.sync.busy = true;
+    state.sync.error = '';
+    let changed = false;
+    refreshSyncBar();
+    try {
+      const list = await App.collecteList(base, token);
+      state.sync.remote = list.length;
+      const vus = state.collecte.vus;
+      const todo = list.filter((e) => !(e.id in vus));
+      const before = new Map(state.guests.map((g) => [g.gk, g.submittedAt]));
+      const existing = new Set((await envAll()).map((r) => r.key));
+      let bad = 0;
+      for (const e of todo) {
+        let env;
+        try {
+          env = await App.collecteGet(base, token, e.id);
+        } catch (err) {
+          if (err.message === 'NOT_FOUND') { vus[e.id] = null; continue; } // disparu entre-temps (durée de vie dépassée)
+          throw err;
+        }
+        const r = await ingestEnvelope(env, existing);
+        if (r.result === 'bad') bad++;
+        vus[e.id] = r.key;
+      }
+      if (todo.length) await save('collecte', state.collecte);
+      if (todo.length) await loadGuests();
+      state.sync.last = Date.now();
+      if (todo.length) {
+        changed = true;
+        const { fresh, updated } = diffGuests(before);
+        App.toast(`Reçu par le service : ${fresh} nouveau(x) · ${updated} mis à jour${bad ? ` · ${bad} illisible(s)` : ''}`);
+      } else if (!quiet) {
+        App.toast('Rien de nouveau sur le service.');
+      }
+    } catch (err) {
+      state.sync.error = App.collecteErrorText(err.message);
+      if (!quiet) App.toast(state.sync.error);
+    } finally {
+      state.sync.busy = false;
+      // la page n'est refaite que si la liste a changé (et jamais sous les doigts de qui remplit les Réglages) ; sinon seule la barre est mise à jour
+      if (state.priv && changed && state.tab !== 'parametres') render(); else refreshSyncBar();
+    }
+  }
+
+  function refreshSyncBar() {
+    const old = document.querySelector('.syncbar');
+    const fresh = syncBar();
+    if (old && fresh) old.replaceWith(fresh);
+  }
+
   async function removeGuest(g) {
     for (const k of g.envKeys) await envDel(k);
+    if (collecteOn()) {
+      // la copie chiffrée du service part aussi ; l'identifiant reste noté comme « vu » pour ne pas être réimporté si la suppression échoue
+      const [base, token] = collecteArgs();
+      const ids = Object.entries(state.collecte.vus).filter(([, k]) => k && g.envKeys.includes(k)).map(([id]) => id);
+      let failed = 0;
+      for (const id of ids) {
+        try { await App.collecteRemove(base, token, id); } catch (e) { if (e.message !== 'NOT_FOUND') failed++; }
+      }
+      if (failed) App.toast('Supprimé ici, mais pas sur le service : videz-le depuis les Réglages.');
+    }
     delete state.assign[g.gk];
     await saveAssign();
     await loadGuests();
@@ -302,7 +393,7 @@
   /** Sans mot de passe : #g=<config>. Avec : #p=<config chiffrée par le mot de passe>. Le mot de passe lui-même n'est jamais dans le lien. */
   async function guestLink(org) {
     const c = org.config;
-    const body = { v: 1, pk: org.publicKey, nom: c.nom, org: c.org, contact: c.contact, lieux: c.lieux, photos: c.photos, retention: c.retention, loueur: c.loueur, programme: c.programme, adresseAuto: c.adresseAuto, langs: c.langs };
+    const body = { v: 1, pk: org.publicKey, nom: c.nom, org: c.org, contact: c.contact, lieux: c.lieux, photos: c.photos, retention: c.retention, loueur: c.loueur, programme: c.programme, adresseAuto: c.adresseAuto, langs: c.langs, collecte: c.collecte };
     const base = location.href.split('#')[0];
     const sig = JSON.stringify([base, body, c.acces]);
     if (linkCache.sig === sig) return linkCache.link; // même lien tant que rien ne change (le chiffrement en produit un nouveau à chaque appel)
@@ -369,7 +460,7 @@
       const list = lieux.value.split('\n').map((l) => l.trim()).filter((l) => l && !seen.has(l) && seen.add(l));
       return App.normalizeConfig({
         nom: nom.value, org: org.value, contact: contact.value, lieux: list, photos: photos.value, retention: retention.value,
-        loueur: loueur.value, programme: prog.entries, adresseAuto: adresseAuto.checked, acces: acces.value, langs: langBoxes.filter((l) => l.cb.checked).map((l) => l.cb.value),
+        loueur: loueur.value, programme: prog.entries, adresseAuto: adresseAuto.checked, acces: acces.value, collecte: cfg.collecte, collecteJeton: cfg.collecteJeton, langs: langBoxes.filter((l) => l.cb.checked).map((l) => l.cb.value),
       });
     };
     return { nodes, read };
@@ -396,6 +487,7 @@
         { date: '2027-05-31', titre: 'Journée plage · Beach party', lieu: 'Mare E Sole' },
       ]),
       loueur: 'Europcar', adresseAuto: true, acces: Vault.randomCode(3, 4), langs: ['fr', 'en', 'it', 'de', 'es'],
+      collecte: '', collecteJeton: App.collecteNewToken(),
     });
     const pass1 = h('input', { type: 'password', required: true, autocomplete: 'new-password', minlength: 14, ...PASS_ATTRS });
     const pass2 = h('input', { type: 'password', required: true, autocomplete: 'new-password', ...PASS_ATTRS });
@@ -536,7 +628,7 @@
     if (!confirm('Effacer la clé et tous les dossiers de ce navigateur ? Sans votre fichier de clé, c’est définitif.')) return;
     try { await store.wipe(); } catch (e) { /* rien à effacer */ }
     mem.clear();
-    Object.assign(state, { org: null, priv: null, guests: [], assign: {}, prix: { remise: null, prix: {} }, stage: null });
+    Object.assign(state, { org: null, priv: null, guests: [], assign: {}, prix: { remise: null, prix: {} }, stage: null, collecte: { vus: {} } });
     render();
     App.toast('Tout est effacé.');
   }
@@ -572,6 +664,20 @@
   }
 
   const badge = (a) => h('span', { class: 'badge ' + a.lvl }, a.txt);
+
+  /** Ligne d'état de la collecte automatique, au-dessus de la liste des invités. */
+  function syncBar() {
+    if (!collecteOn()) return null;
+    const y = state.sync;
+    const at = y.last ? new Intl.DateTimeFormat('fr-FR', { hour: '2-digit', minute: '2-digit' }).format(new Date(y.last)) : '';
+    const text = y.busy ? 'Vérification du service…'
+      : y.error ? y.error
+        : y.last ? `Collecte automatique : ${y.remote} dépôt${y.remote > 1 ? 's' : ''} sur le service · vérifié à ${at}. Un dépôt peut mettre jusqu’à une minute à apparaître.`
+          : 'Collecte automatique activée.';
+    return h('div', { class: 'syncbar' + (y.error ? ' warn' : '') },
+      h('span', { class: 'dot', 'aria-hidden': 'true' }), h('span', { class: 'txt', role: 'status' }, text),
+      h('button', { class: 'btn small', disabled: y.busy, onclick: () => syncCollecte() }, 'Actualiser'));
+  }
 
   function tabInvites() {
     const fileInput = h('input', { type: 'file', multiple: true, class: 'offscreen', accept: '.txt,.json,text/plain,application/json',
@@ -619,7 +725,7 @@
     }
     fill();
 
-    return h('div', {}, drop,
+    return h('div', {}, syncBar(), drop,
       h('div', { class: 'toolbar' }, search, h('label', { class: 'check inline' }, only, h('span', {}, 'Seulement ceux avec une alerte'))),
       h('div', { class: 'tablewrap' }, h('table', { class: 'tbl' },
         h('thead', {}, h('tr', {}, ['Invité', 'Âge', 'Retrait', 'Retour', 'Pers.', 'Catégorie', 'Alertes', 'Voiture'].map((t) => h('th', {}, t)))),
@@ -702,7 +808,107 @@
         c.members.length > 1 ? h('button', { class: 'btn ghost small', onclick: async () => { setAssign(m, { car: '', principal: false }); await saveAssign(); render(); } }, 'Sortir') : null))));
   }
 
+  /** Réglages : service de collecte (facultatif). L'adresse est publique et part dans le lien invités ; le jeton ne quitte jamais cet outil et Cloudflare. */
+  function collecteCard() {
+    const org = state.org;
+    const c = org.config;
+    const url = h('input', { type: 'url', inputmode: 'url', value: c.collecte, placeholder: 'https://mariage-voiture.votre-compte.workers.dev',
+      autocomplete: 'off', autocapitalize: 'off', spellcheck: 'false', 'aria-label': 'Adresse du service de collecte' });
+    const out = h('p', { class: 'hint', 'aria-live': 'polite' });
+    const say = (text, kind = '') => { out.textContent = text; out.className = 'hint ' + kind; };
+    const parsed = () => (url.value.trim() ? App.collecteUrl(url.value) : '');
+
+    const test = h('button', { type: 'button', class: 'btn', onclick: async () => {
+      const base = parsed();
+      if (!base) return say('Adresse invalide : elle doit commencer par https:// (ex. https://mariage-voiture.moi.workers.dev).', 'warn');
+      test.disabled = true;
+      say('Test en cours…');
+      try {
+        const ping = await App.collectePing(base);
+        if (!ping.stockage) return say('Le service répond, mais le stockage KV n’est pas relié (nom de variable : ENVOIS).', 'warn');
+        if (!ping.lecture) return say('Le service répond, mais il manque le secret JETON_LECTURE.', 'warn');
+        const list = await App.collecteList(base, c.collecteJeton);
+        say(`✓ Service joignable, jeton accepté. ${list.length} dépôt${list.length > 1 ? 's' : ''} en attente.`, 'ok');
+      } catch (e) {
+        say(App.collecteErrorText(e.message), 'warn');
+      } finally {
+        test.disabled = false;
+      }
+    } }, 'Tester');
+
+    const save1 = h('button', { type: 'button', class: 'btn primary', onclick: async () => {
+      const base = parsed();
+      if (url.value.trim() && !base) return say('Adresse invalide : elle doit commencer par https://.', 'warn');
+      state.org = { ...org, config: { ...c, collecte: base } };
+      await save('org', state.org);
+      App.toast(base
+        ? 'Enregistré. Le lien invités a changé : renvoyez-le. Les formulaires enverront désormais les dossiers au service.'
+        : 'Collecte désactivée. Le lien invités a changé : les invités enverront de nouveau un fichier.');
+      render();
+    } }, 'Enregistrer');
+
+    const newToken = h('button', { type: 'button', class: 'btn ghost small', onclick: async () => {
+      if (!confirm('Générer un nouveau jeton ? Le secret JETON_LECTURE de Cloudflare devra être remplacé par le nouveau, sinon la récupération sera refusée.')) return;
+      state.org = { ...org, config: { ...c, collecteJeton: App.collecteNewToken() } };
+      await save('org', state.org);
+      App.toast('Nouveau jeton. Mettez-le dans Cloudflare (secret JETON_LECTURE).');
+      render();
+    } }, 'Nouveau jeton');
+
+    const copyCode = h('button', { type: 'button', class: 'btn', onclick: async () => {
+      try {
+        const r = await fetch('collecte/worker.js', { cache: 'no-store' });
+        if (!r.ok) throw new Error('HTTP');
+        await App.copy(await r.text());
+        App.toast('Code du service copié : collez-le dans Cloudflare.');
+      } catch (e) {
+        App.toast('Le code n’a pas pu être lu ici : ouvrez le fichier collecte/worker.js du dossier de l’outil et copiez-le.');
+      }
+    } }, 'Copier le code du service');
+
+    const on = collecteOn();
+    const purge = h('button', { type: 'button', class: 'btn danger small', onclick: async () => {
+      if (!confirm('Supprimer du service tous les dossiers qu’il garde ? Ceux déjà récupérés dans cet outil restent ici.')) return;
+      purge.disabled = true;
+      try {
+        const n = await App.collectePurge(...collecteArgs(), { onProgress: (k) => say(`Suppression… ${k}`) });
+        state.sync.remote = 0;
+        say(`${n} dépôt${n > 1 ? 's' : ''} supprimé${n > 1 ? 's' : ''} du service.`, 'ok');
+      } catch (e) {
+        say(App.collecteErrorText(e.message), 'warn');
+      } finally {
+        purge.disabled = false;
+      }
+    } }, 'Vider le service');
+
+    return h('section', { class: 'card' },
+      h('h2', {}, 'Collecte automatique (facultatif)'),
+      h('p', { class: 'note' }, 'Sans cela, chaque invité vous envoie un fichier chiffré que vous importez. Avec cela, le formulaire dépose le dossier, déjà chiffré, sur un petit service Cloudflare gratuit : il arrive tout seul dans l’onglet Invités. Le service ne peut rien lire (il n’a aucune clé) ; il voit seulement l’heure, la taille et l’adresse IP de chaque dépôt. Il garde les dossiers jusqu’à la date de suppression indiquée plus haut (120 jours à défaut).'),
+      h('details', {},
+        h('summary', {}, 'Mise en place pas à pas (une dizaine de minutes, une seule fois)'),
+        h('ol', { class: 'steps' },
+          h('li', {}, 'Créez un compte gratuit sur ', h('strong', {}, 'cloudflare.com'), '.'),
+          h('li', {}, 'Dans le tableau de bord : ', h('strong', {}, 'Stockage et bases de données › KV › Créer un espace de noms'), ', nommez-le ', h('code', {}, 'envois-mariage'), '.'),
+          h('li', {}, h('strong', {}, 'Calcul › Workers et Pages › Créer › Worker'), ' (modèle « Hello World »), nommez-le ', h('code', {}, 'mariage-voiture'), ', déployez. Puis ', h('strong', {}, 'Modifier le code'), ' : effacez tout, collez le code (bouton ci-dessous), déployez.'),
+          h('li', {}, 'Dans le Worker, onglet ', h('strong', {}, 'Liaisons'), ' : ajoutez un ', h('strong', {}, 'espace de noms KV'), ', variable ', h('code', {}, 'ENVOIS'), ', espace ', h('code', {}, 'envois-mariage'), '.'),
+          h('li', {}, 'Onglet ', h('strong', {}, 'Variables et secrets'), ' : ajoutez un ', h('strong', {}, 'secret'), ' nommé ', h('code', {}, 'JETON_LECTURE'), ' dont la valeur est le jeton ci-dessous.'),
+          h('li', {}, 'Copiez l’adresse du Worker (elle finit par ', h('code', {}, '.workers.dev'), '), collez-la ci-dessous, ', h('strong', {}, 'Tester'), ', ', h('strong', {}, 'Enregistrer'), ', puis renvoyez le nouveau lien aux invités.')),
+        h('p', { class: 'hint' }, 'Les intitulés peuvent varier un peu selon la version du site de Cloudflare. Pas à pas détaillé aussi dans collecte/LISEZMOI.md.'),
+        h('div', { class: 'actions' }, copyCode)),
+      h('div', { class: 'field' }, h('span', { class: 'lbl' }, 'Jeton de lecture (secret JETON_LECTURE)'),
+        h('div', { class: 'row' }, h('code', { class: 'secret' }, c.collecteJeton), h('button', { type: 'button', class: 'btn', onclick: () => App.copy(c.collecteJeton) }, 'Copier'), newToken),
+        h('span', { class: 'hint' }, 'Il permet de lire et de supprimer les dépôts : ne le donnez à personne. Il n’est pas dans le lien invités. Il figure dans votre fichier de clé.')),
+      h('label', { class: 'field' }, h('span', { class: 'lbl' }, 'Adresse du service'), url,
+        h('span', { class: 'hint' }, 'Vide : les invités envoient un fichier, comme avant. Cette adresse, elle, est dans le lien invités.')),
+      h('div', { class: 'actions' }, test, save1, on ? purge : null),
+      out);
+  }
+
   function tabReglages() {
+    if (!state.org.config.collecteJeton) { // organisateur créé avant la collecte : le jeton est fabriqué et gardé tout de suite
+      state.org = { ...state.org, config: { ...state.org.config, collecteJeton: App.collecteNewToken() } };
+      save('org', state.org);
+    }
     const org = state.org;
     const linkBox = h('input', { type: 'text', readonly: true, value: '…', 'aria-label': 'Lien à envoyer aux invités', onfocus: (e) => e.target.select() });
     const copyLink = h('button', { class: 'btn', disabled: true, onclick: () => App.copy(linkBox.value) }, 'Copier');
@@ -728,6 +934,7 @@
         h('p', { class: 'note' }, 'Tout est dans le lien, après le #. Cette partie n’est jamais envoyée au serveur qui héberge la page' + (org.config.acces ? ', et elle est chiffrée par le mot de passe.' : '.')),
         h('p', {}, 'Empreinte de votre clé : ', fp),
         h('p', { class: 'note' }, 'Écrivez-la dans votre message d’invitation. Un invité qui voit une autre empreinte sur son formulaire a reçu un lien modifié : qu’il vous prévienne.')),
+      collecteCard(),
       h('section', { class: 'card' },
         h('h2', {}, 'Seuils d’alerte'),
         h('p', { class: 'note' }, 'Les conditions varient selon l’agence et la catégorie de voiture : confirmez-les avec Europcar, puis ajustez ici.'),
@@ -764,7 +971,10 @@
     if (!state.org) { name = 'setup'; view = viewSetup(); }
     else if (!state.priv) { name = 'lock'; view = viewLock(); }
     else if (state.stage === 'backup') { name = 'backup'; view = viewBackup(); }
-    else { name = 'dash:' + state.tab; view = viewDashboard(); }
+    else {
+      name = 'dash:' + state.tab; view = viewDashboard();
+      if (!state.sync.started && collecteOn()) { state.sync.started = true; setTimeout(() => syncCollecte({ quiet: true }), 0); } // une fois par déverrouillage
+    }
     const y = window.scrollY;
     root.replaceChildren(view);
     window.scrollTo(0, name === lastView ? y : 0); // on garde la position quand on modifie une voiture
@@ -776,10 +986,12 @@
       state.org = (await store.get('meta', 'org')) || null;
       state.settings = { ...DEFAULT_SETTINGS, ...((await store.get('meta', 'settings')) || {}) };
       state.prix = { remise: null, prix: {}, ...((await store.get('meta', 'prix')) || {}) };
+      state.collecte = { vus: {}, ...((await store.get('meta', 'collecte')) || {}) };
     } catch (e) {
       state.noStorage = true;
     }
     ['pointerdown', 'keydown'].forEach((ev) => document.addEventListener(ev, touch, true));
+    setInterval(() => { if (document.visibilityState === 'visible') syncCollecte({ quiet: true }); }, 120000); // sans effet verrouillé ou sans service
     render();
   };
 })();

@@ -1,0 +1,12 @@
+# Mise en place en ligne de commande (facultative : le pas à pas du LISEZMOI passe par le tableau de bord Cloudflare).
+#   npm i -g wrangler && wrangler login
+#   wrangler kv namespace create ENVOIS      # recopiez l'identifiant affiché ci-dessous
+#   wrangler secret put JETON_LECTURE        # collez le jeton affiché dans l'outil (Réglages)
+#   wrangler deploy
+name = "mariage-voiture"
+main = "worker.js"
+compatibility_date = "2025-01-01"
+
+[[kv_namespaces]]
+binding = "ENVOIS"
+id = "REMPLACEZ-PAR-L-IDENTIFIANT-DU-STOCKAGE"

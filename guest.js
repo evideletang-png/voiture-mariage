@@ -13,7 +13,7 @@
     } catch (e) {
       return null;
     }
-    return { v: 1, pk: c.pk, ...App.normalizeConfig(c), acces: '' };
+    return { v: 1, pk: c.pk, ...App.normalizeConfig(c), acces: '', collecteJeton: '' };
   }
 
   /** Lit la config dans le fragment d'URL (#g=...). Un fragment n'est jamais envoyé à un serveur. */
@@ -777,13 +777,17 @@
           const rnd = Vault.toB64u(crypto.getRandomValues(new Uint8Array(5)));
           st.encrypted = new File([JSON.stringify(env)], `voiture-mariage-${rnd}.txt`, { type: 'text/plain' });
           st.values = snapshot(form); // pour « Modifier mes réponses »
+          if (cfg.collecte) {
+            nextBtn.textContent = t('sending');
+            await deliver();
+          }
           showDone();
         } catch (e) {
           status.textContent = t('errEncrypt');
           status.hidden = false;
         } finally {
           nextBtn.disabled = false;
-          nextBtn.textContent = t('submit');
+          nextBtn.textContent = cfg.collecte ? t('submitSend') : t('submit');
         }
       }
 
@@ -839,7 +843,7 @@
         stepLabel.textContent = `${t('stepOf', { n: st.step + 1, total: LAST + 1 })} · ${stepTitle(st.step)}`;
         bar.style.setProperty('--p', String(((st.step + 1) / (LAST + 1)) * 100));
         prevBtn.hidden = st.step === 0;
-        nextBtn.textContent = st.step === LAST ? t('submit') : t('next');
+        nextBtn.textContent = st.step === LAST ? (cfg.collecte ? t('submitSend') : t('submit')) : t('next');
         status.hidden = true;
         if (scroll) window.scrollTo({ top: st.step === 0 ? 0 : Math.max(0, form.getBoundingClientRect().top + window.scrollY - 150), behavior: 'smooth' });
       }
@@ -868,7 +872,7 @@
         App.hero({ big: true, eyebrow: 'Benvenuti in Corsica', title: cfg.nom, lead: t('lead') }),
         programmeBlock(st.lang, false) || '', // append(null) écrirait « null » dans la page
         h('div', { class: 'callout' },
-          h('strong', {}, t('privacyLead')), t('privacyBody', { org: orgName }), cfg.adresseAuto ? ' ' + t('privacyAddr') : '',
+          h('strong', {}, t('privacyLead')), t(cfg.collecte ? 'privacyBodySent' : 'privacyBody', { org: orgName }), cfg.adresseAuto ? ' ' + t('privacyAddr') : '',
           h('details', {},
             h('summary', {}, t('collectedSummary')),
             h('p', {}, t('collectedBody'),
@@ -925,25 +929,55 @@
         t('noticeBody', { org: orgName }));
     }
 
-    /* ----- 3. fichier prêt ----- */
+    /* ----- 3. dossier envoyé, ou fichier prêt ----- */
+
+    /** Durée de conservation demandée au service : jusqu'au lendemain de la date de suppression annoncée aux invités. */
+    function retentionTtl() {
+      const d = cfg.retention ? App.dt(cfg.retention) : null;
+      return d ? Math.max(86400, Math.ceil((d.getTime() - Date.now()) / 1000) + 86400) : undefined;
+    }
+
+    /** Dépose le dossier chiffré sur le service de collecte. S'il échoue, le fichier reste le moyen de secours. */
+    async function deliver() {
+      st.sent = false;
+      st.sendFailed = false;
+      try {
+        await App.collecteSend(cfg.collecte, await st.encrypted.text(), { ttl: retentionTtl() });
+        st.sent = true;
+      } catch (e) {
+        st.sendFailed = true;
+      }
+    }
 
     function showDone() {
       const t = App.t(st.lang);
       const orgName = cfg.org || t('orgFallback');
       const file = st.encrypted;
       const canShare = !!(navigator.canShare && navigator.canShare({ files: [file] }));
+      const automatic = !!cfg.collecte;
+      const retry = h('button', { class: 'btn primary big', onclick: async () => {
+        retry.disabled = true;
+        retry.textContent = t('sending');
+        await deliver();
+        showDone();
+      } }, t('retrySend'));
+      // reçu : plus rien à faire. Pas de service, ou envoi raté : le fichier chiffré à transmettre soi-même.
+      const manual = !st.sent;
+      const lead = !manual ? t('sentLead', { org: orgName }) : t('doneLead', { org: orgName, contact: cfg.contact ? ` (${cfg.contact})` : '' });
       root.replaceChildren(h('div', { class: 'wrap narrow' },
-        App.hero({
-          eyebrow: t('doneEyebrow'), title: t('doneTitle'),
-          lead: t('doneLead', { org: orgName, contact: cfg.contact ? ` (${cfg.contact})` : '' }),
-        }),
+        App.hero(manual
+          ? { eyebrow: t('doneEyebrow'), title: t('doneTitle'), lead }
+          : { eyebrow: t('sentEyebrow'), title: t('sentTitle'), lead }),
+        st.sendFailed ? h('p', { class: 'callout warn', role: 'alert' }, t('sendFailed', { org: orgName, contact: cfg.contact ? ` (${cfg.contact})` : '' })) : null,
         h('div', { class: 'actions' },
-          canShare ? h('button', { class: 'btn primary big', onclick: async () => {
+          manual && automatic ? retry : null,
+          manual && canShare ? h('button', { class: automatic ? 'btn' : 'btn primary big', onclick: async () => {
             try {
               await navigator.share({ files: [file], title: `${t('eyebrow')} – ${cfg.nom}` });
             } catch (e) { /* annulé par l'utilisateur */ }
           } }, t('send')) : null,
-          h('button', { class: canShare ? 'btn' : 'btn primary big', onclick: () => App.download(file, file.name) }, t('saveFile'))),
+          manual ? h('button', { class: canShare || automatic ? 'btn' : 'btn primary big', onclick: () => App.download(file, file.name) }, t('saveFile'))
+            : h('button', { class: 'btn ghost', onclick: () => App.download(file, file.name) }, t('sentCopy'))),
         noticeBlock(t, orgName),
         h('p', { class: 'note' }, t('resendNote')),
         h('p', {}, h('button', { class: 'btn ghost', onclick: showForm }, t('back')))));

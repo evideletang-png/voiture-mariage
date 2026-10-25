@@ -2,7 +2,7 @@
 
 Outil pour recueillir les infos de location de voiture de vos invités (identité, permis, trajet), puis préparer la demande de devis et la réservation pour le loueur (Europcar en Corse).
 
-Il n'y a **pas de serveur** : tout se passe dans les navigateurs. Les dossiers sont chiffrés chez l'invité, et seul l'organisateur peut les ouvrir.
+Par défaut il n'y a **pas de serveur** : tout se passe dans les navigateurs. Les dossiers sont chiffrés chez l'invité, et seul l'organisateur peut les ouvrir. Un petit service de **collecte automatique** (Cloudflare, gratuit, qui ne garde que du chiffré) est proposé en option : les dossiers arrivent alors tout seuls dans l'onglet Invités, voir [`collecte/LISEZMOI.md`](collecte/LISEZMOI.md).
 
 ## Mise en ligne (une fois)
 
@@ -16,8 +16,8 @@ Pour tester chez vous : `python3 serve.py` dans ce dossier, puis http://localhos
 
 1. **Vous** ouvrez l'adresse, remplissez l'événement, choisissez une phrase de passe, téléchargez le fichier de clé et rangez-le.
 2. Onglet **Réglages** : copiez le lien invités, le mot de passe qui l'accompagne et notez l'empreinte de clé. Envoyez les trois aux invités, le mot de passe de préférence dans un second message.
-3. **Chaque invité** ouvre le lien, saisit le mot de passe, choisit sa langue, remplit le formulaire, puis son navigateur produit un fichier `.txt` chiffré qu'il vous envoie (partage direct sur mobile, e-mail, WhatsApp…).
-4. **Vous** déverrouillez l'outil et importez les fichiers (onglet Invités). Les alertes signalent jeunes conducteurs, permis récents ou expirés, dates incohérentes.
+3. **Chaque invité** ouvre le lien, saisit le mot de passe, choisit sa langue, remplit le formulaire, puis son navigateur chiffre le dossier. Sans collecte automatique, il produit un fichier `.txt` qu'il vous envoie (partage direct sur mobile, e-mail, WhatsApp…). Avec, le dossier part tout seul vers votre service et l'invité voit « C'est bien reçu ».
+4. **Vous** déverrouillez l'outil : avec la collecte automatique, les dossiers sont déjà là (vérification à l'ouverture, puis toutes les 2 minutes) ; sinon, importez les fichiers (onglet Invités). Les alertes signalent jeunes conducteurs, permis récents ou expirés, dates incohérentes.
 5. Onglet **Voitures** : regroupez ceux qui partagent. Le loueur facture par véhicule.
 6. Onglet **Export** :
    - la *demande de devis* ne contient aucune donnée personnelle : elle part par e-mail ordinaire ;
@@ -70,7 +70,8 @@ Un mot de passe est proposé à la création (3 groupes de 4 caractères au hasa
 | Contenu en transit (e-mail, WhatsApp, hébergeur) | Chiffré chez l'invité : ECDH P-256 + HKDF + AES-256-GCM, clé éphémère par envoi |
 | Sur le disque de l'organisateur | Seuls des fichiers chiffrés sont stockés. La clé privée est enveloppée par la phrase de passe (PBKDF2 600 000 tours + AES-GCM) |
 | Mémoire | Déchiffré uniquement pendant la session ; verrouillage automatique après 10 min |
-| Exfiltration par la page | Politique CSP : pas de script externe ; seules requêtes autorisées : les suggestions d'adresses vers `data.geopf.fr` et `photon.komoot.io` (désactivables) |
+| Exfiltration par la page | Politique CSP : pas de script externe ; seules requêtes autorisées : les suggestions d'adresses vers `data.geopf.fr` et `photon.komoot.io` (désactivables) et, si vous activez la collecte automatique, `*.workers.dev` |
+| Service de collecte (facultatif) | Ne reçoit que des enveloppes déjà chiffrées avec votre clé publique : il n'a aucune clé et ne peut rien lire. Lecture et suppression protégées par un jeton que seul votre outil connaît (jamais dans le lien). Durée de vie bornée à votre date de suppression |
 | Photos du permis | Lues sur le téléphone, jamais envoyées (sauf si l'invité coche « Joindre » ou si vous les exigez, et alors chiffrées avec le dossier) ; réduites et débarrassées de leurs métadonnées (GPS) |
 | Fichier CSV | Cellules neutralisées contre l'injection de formules |
 
@@ -79,6 +80,7 @@ Limites à connaître :
 - **La lecture du permis demande d'assouplir un peu la politique de sécurité** : `'wasm-unsafe-eval'` (le moteur est du WebAssembly), `worker-src 'self'` et `connect-src 'self'` (pour lire le moteur et le modèle sur le site). Aucun hôte extérieur n'est ajouté. Ne mettez rien d'autre que cet outil sur le même site.
 - **Une lecture peut se tromper** (reflet, hologramme, photo floue) : c'est pourquoi tout est à vérifier et rien n'est bloquant. Testée ici sur des cartes factices, pas sur de vrais permis : essayez avec le vôtre avant d'envoyer le lien.
 - **Le lien est le point de confiance.** Qui modifie le lien ou la page peut substituer sa propre clé. D'où l'empreinte : comparez-la.
+- **Avec la collecte automatique, un tiers (Cloudflare) héberge vos dossiers, chiffrés.** Il voit l'heure, la taille et l'IP de chaque dépôt, pas le contenu. N'importe qui connaissant l'adresse du service peut y déposer du bruit (illisible, écarté à l'import). Le jeton de lecture figure dans votre fichier de clé : ne le versez pas dans un dépôt public ni ne l'envoyez (le `.gitignore` fourni l'exclut).
 - **Un hébergeur compromis** pourrait servir un JavaScript piégé. Prenez un hébergeur que vous contrôlez, et n'y mettez pas d'autre code.
 - **Phrase de passe ou fichier de clé perdus = dossiers perdus.** C'est voulu. Une case « Afficher la phrase de passe » (création et déverrouillage) évite les fautes de frappe ; la correction automatique est coupée sur ces champs.
 - **Le ZIP AES-256** se lit avec 7-Zip, WinRAR, Keka. Certains outils intégrés à Windows et macOS ne l'ouvrent pas : demandez à l'agence.
@@ -104,7 +106,8 @@ Conditions d'âge, ancienneté de permis, surcoût jeune conducteur et caution v
 - `vault.js` : chiffrement ; `serve.py` : petit serveur de test sans cache
 - `estimate.js` : remise, part par invité, message d'estimation
 - `contact.js` : pays, indicatifs, téléphone, adresse par pays, e-mail ; `address.js` : suggestions d'adresses ; `licence.js` : lecture des champs du permis ; `scan.js` : lecture du texte sur la photo ; `vendor/tesseract/` : moteur et modèle français (Apache-2.0 / MIT, licences jointes) ; `cars.js` : choix de la catégorie ; `i18n.js` : les 5 langues ; `programme.js` : programme et dates proposées
+- `collecte.js` : envoi des dossiers au service et récupération ; `collecte/` : le service lui-même (`worker.js`, `wrangler.toml`) et son pas-à-pas
 - `ui.js`, `guest.js`, `organizer.js`, `export.js`, `main.js` : interface
-- `test/` : `node --test test/*.test.mjs` (chiffrement et mot de passe d'accès, téléphone, adresse, voiture, permis, cohérence des traductions)
+- `test/` : `node --test test/*.test.mjs` (chiffrement et mot de passe d'accès, téléphone, adresse, voiture, permis, collecte automatique, cohérence des traductions)
 - `vendor/zip-no-worker.min.js` : zip.js 2.7.57 (BSD-3), chargé uniquement à l'export du ZIP
 - `_headers` : en-têtes de sécurité (Netlify / Cloudflare)

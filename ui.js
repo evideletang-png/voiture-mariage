@@ -274,6 +274,8 @@
     programme: App.normalizeProgramme(c.programme),
     adresseAuto: c.adresseAuto !== false,
     acces: String(c.acces || '').trim().slice(0, 64), // mot de passe d'accès des invités : n'est jamais mis dans le lien en clair
+    collecte: App.collecteUrl(c.collecte),            // adresse du service de collecte (publique : dans le lien invités)
+    collecteJeton: App.collecteTokenOk(c.collecteJeton) ? String(c.collecteJeton) : '', // jeton de lecture : jamais dans le lien
     langs: (() => {
       const known = ['fr', 'en', 'it', 'de', 'es'];
       const asked = (Array.isArray(c.langs) ? c.langs : []).filter((l, i, a) => known.includes(l) && a.indexOf(l) === i);

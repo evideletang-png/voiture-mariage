@@ -3,9 +3,9 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <!-- Rien ne peut sortir de la page : pas de fetch, pas de script externe, pas d'image distante. -->
+  <!-- Pas de script externe ni d'image distante. Les seules sorties : suggestions d'adresses (Géoplateforme, Photon) et, si l'organisateur l'a réglé, son service de collecte (*.workers.dev), qui ne reçoit que du chiffré. -->
   <meta http-equiv="Content-Security-Policy"
-        content="default-src 'none'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self'; style-src 'self'; img-src 'self' data: blob:; font-src 'self'; connect-src 'self' https://data.geopf.fr https://photon.komoot.io; form-action 'none'; base-uri 'none'">
+        content="default-src 'none'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self'; style-src 'self'; img-src 'self' data: blob:; font-src 'self'; connect-src 'self' https://data.geopf.fr https://photon.komoot.io https://*.workers.dev; form-action 'none'; base-uri 'none'">
   <meta name="referrer" content="no-referrer">
   <meta name="robots" content="noindex,nofollow">
   <title>Voiture de mariage</title>
@@ -26,6 +26,7 @@
   <script src="contact.js"></script>
   <script src="address.js"></script>
   <script src="licence.js"></script>
+  <script src="collecte.js"></script>
   <script src="scan.js"></script>
   <script src="cars.js"></script>
   <script src="i18n.js"></script>

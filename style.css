@@ -474,3 +474,12 @@ h1, h2, h3, .ev-day, .ev-title, fieldset.step > legend, dialog.detail h2 { font-
 .landing.gate .rule { margin: 0 auto 16px; }
 .landing.gate .lead { max-width: 30ch; margin: 0 auto; font-size: 1.15rem; }
 .gate-form .btn { width: 100%; min-height: 54px; margin-top: 6px; }
+
+/* ---------- collecte automatique ---------- */
+.syncbar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin: 0 0 14px; padding: 10px 14px; border-radius: 14px; background: var(--ok-soft); font-size: 0.88rem; }
+.syncbar .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--ok); flex: none; }
+.syncbar .txt { flex: 1 1 220px; min-width: 0; }
+.syncbar.warn { background: var(--warn-soft); box-shadow: inset 3px 0 0 var(--warn); }
+.syncbar.warn .dot { background: var(--warn); }
+ol.steps { padding-left: 22px; margin: 10px 0; display: grid; gap: 8px; }
+ol.steps code, .card .field code { overflow-wrap: anywhere; }
