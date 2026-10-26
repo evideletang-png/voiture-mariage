@@ -727,6 +727,7 @@
 
         h('fieldset', {}, h('legend', {}, t('s5')),
           field(t('notes'), h('textarea', { name: 'notes', rows: 2, maxlength: 600 })),
+          cfg.collecte ? h('div', { class: 'callout stored' }, h('strong', {}, t('storedTitle')), storedList(t, orgName)) : null,
           h('label', { class: 'check' }, h('input', { type: 'checkbox', name: 'consent', required: true }),
             h('span', {}, t('consent', { org: orgName, loueur: cfg.loueur }))),
           ));
@@ -878,7 +879,8 @@
             h('p', {}, t('collectedBody'),
               cfg.retention ? t('retentionDate', { date: App.fmtDate(App.dt(cfg.retention)) }) : t('retentionDefault'),
               cfg.contact ? t('contactRights', { contact: cfg.contact }) : ''),
-            h('p', {}, t('fpLabel'), fp, h('br'), h('span', { class: 'hint' }, t('fpHint'))))),
+            h('p', {}, t('fpLabel'), fp, h('br'), h('span', { class: 'hint' }, t('fpHint')))),
+          cfg.collecte ? h('details', {}, h('summary', {}, t('storedTitle')), h('div', { class: 'stored-body' }, storedList(t, orgName))) : null),
         noticeBlock(t, orgName));
 
       root.replaceChildren(h('div', { class: 'wrap narrow' },
@@ -920,6 +922,18 @@
       updateAdvisor();
       renderStep(false);
       window.scrollTo(0, 0);
+    }
+
+    /** Avec la collecte automatique : ce qui est stocké en ligne, dit sans détour. Réutilisé à l'accueil (repliable) et avant la case d'accord. */
+    function storedList(t, orgName) {
+      const photos = cfg.photos === 'requis' ? t('storedPhotosYes', { org: orgName }) : cfg.photos === 'optionnel' ? t('storedPhotosOpt') : '';
+      return [
+        h('p', {}, t('storedIntro', { org: orgName })),
+        h('ul', {}, h('li', {}, t('storedPeople')), h('li', {}, t('storedLicence')), h('li', {}, t('storedTrip')), photos ? h('li', {}, photos) : null),
+        cfg.photos === 'scan' ? h('p', {}, t('storedPhotosNo')) : null,
+        h('p', {}, t('storedClear')),
+        h('p', {}, cfg.retention ? t('storedKeep', { date: App.fmtDate(App.dt(cfg.retention)) }) : t('storedKeepDefault')),
+      ];
     }
 
     /** « Et ensuite ? » : une estimation tarifaire suivra. */

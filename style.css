@@ -139,7 +139,7 @@ fieldset.step > legend + * { clear: both; }
 .field .hint { display: block; margin-top: 5px; }
 .stack > * { margin-bottom: 8px; }
 
-input[type=text], input[type=email], input[type=tel], input[type=date], input[type=datetime-local],
+input[type=text], input[type=email], input[type=tel], input[type=url], input[type=date], input[type=datetime-local],
 input[type=number], input[type=password], input[type=search], select, textarea {
   width: 100%; font: inherit; color: inherit;
   background: var(--surface-2); border: 1px solid transparent; border-radius: var(--r-field);
@@ -483,3 +483,11 @@ h1, h2, h3, .ev-day, .ev-title, fieldset.step > legend, dialog.detail h2 { font-
 .syncbar.warn .dot { background: var(--warn); }
 ol.steps { padding-left: 22px; margin: 10px 0; display: grid; gap: 8px; }
 ol.steps code, .card .field code { overflow-wrap: anywhere; }
+.card details { margin: 12px 0 16px; }
+.card summary { cursor: pointer; color: var(--gold-deep); font-weight: 500; }
+.card details[open] > summary { margin-bottom: 8px; }
+.stored { margin: 14px 0; padding: 14px 16px; border-radius: 14px; background: var(--surface-2); font-size: 0.92rem; }
+.stored p { margin: 8px 0 0; }
+.stored ul { margin: 8px 0 0; padding-left: 20px; display: grid; gap: 4px; }
+.callout.stored { background: var(--accent-soft); }
+.callout details .stored-body > :first-child { margin-top: 6px; }

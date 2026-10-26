@@ -808,6 +808,29 @@
         c.members.length > 1 ? h('button', { class: 'btn ghost small', onclick: async () => { setAssign(m, { car: '', principal: false }); await saveAssign(); render(); } }, 'Sortir') : null))));
   }
 
+  /** Réglages : ce que le service de collecte garde, exactement, selon les réglages en cours. */
+  function storedBox() {
+    const c = state.org.config;
+    const photos = c.photos === 'requis' ? 'les photos du recto et du verso du permis (réglage « Scan du permis » : photos obligatoires)'
+      : c.photos === 'optionnel' ? 'les photos du permis, seulement celles que l’invité choisit de joindre' : '';
+    return h('div', { class: 'stored' },
+      h('p', {}, h('strong', {}, 'Dans chaque dépôt : un seul bloc chiffré'), ', illisible sans votre clé privée (que seul cet outil, déverrouillé par votre phrase de passe, possède). Il contient :'),
+      h('ul', {},
+        h('li', {}, 'l’identité et les coordonnées : prénom, nom, date de naissance, e-mail, téléphone, adresse'),
+        h('li', {}, 'le permis : pays, numéro, dates de délivrance et d’expiration'),
+        h('li', {}, 'le séjour : lieux de retrait et de restitution, dates, vol, passagers, bagages'),
+        h('li', {}, 'la voiture : catégorie, boîte, siège enfant, options, partage éventuel avec un autre invité, notes'),
+        photos ? h('li', {}, photos) : null,
+        h('li', {}, 'la langue du formulaire et l’heure d’envoi')),
+      c.photos === 'scan' ? h('p', {}, 'Les photos du permis ne sont pas stockées : elles servent seulement à remplir les champs, sur le téléphone de l’invité.') : null,
+      h('p', {}, h('strong', {}, 'Visible du service sans la clé : '), 'l’heure du dépôt, la taille du bloc, un identifiant tiré au hasard, les 8 premiers caractères de l’empreinte de votre clé et les paramètres techniques du chiffrement ; côté Cloudflare, l’adresse IP de l’expéditeur.'),
+      h('p', {}, h('strong', {}, 'Jamais en ligne : '), 'votre clé privée et votre phrase de passe, le mot de passe des invités, les prix et la remise, les regroupements en voitures, les alertes. Le jeton de lecture est le seul secret que vous confiez à Cloudflare.'),
+      h('p', {}, h('strong', {}, 'Durée : '), c.retention
+        ? `les dépôts sont effacés automatiquement après le ${App.fmtDate(App.dt(c.retention))} (la date de suppression des réglages).`
+        : 'les dépôts sont effacés automatiquement au bout de 120 jours au plus (aucune date de suppression n’est réglée).',
+      ' Supprimer un invité dans l’outil supprime aussi sa copie sur le service.'));
+  }
+
   /** Réglages : service de collecte (facultatif). L'adresse est publique et part dans le lien invités ; le jeton ne quitte jamais cet outil et Cloudflare. */
   function collecteCard() {
     const org = state.org;
@@ -883,7 +906,8 @@
 
     return h('section', { class: 'card' },
       h('h2', {}, 'Collecte automatique (facultatif)'),
-      h('p', { class: 'note' }, 'Sans cela, chaque invité vous envoie un fichier chiffré que vous importez. Avec cela, le formulaire dépose le dossier, déjà chiffré, sur un petit service Cloudflare gratuit : il arrive tout seul dans l’onglet Invités. Le service ne peut rien lire (il n’a aucune clé) ; il voit seulement l’heure, la taille et l’adresse IP de chaque dépôt. Il garde les dossiers jusqu’à la date de suppression indiquée plus haut (120 jours à défaut).'),
+      h('p', { class: 'note' }, 'Sans cela, chaque invité vous envoie un fichier chiffré que vous importez. Avec cela, le formulaire dépose le dossier, déjà chiffré, sur un petit service Cloudflare gratuit : il arrive tout seul dans l’onglet Invités. Le service ne peut rien lire : il n’a aucune clé. Ce qu’il garde, exactement :'),
+      storedBox(),
       h('details', {},
         h('summary', {}, 'Mise en place pas à pas (une dizaine de minutes, une seule fois)'),
         h('ol', { class: 'steps' },

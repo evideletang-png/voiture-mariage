@@ -6,6 +6,8 @@ Durée : une dizaine de minutes, une seule fois. Coût : zéro (plan gratuit de 
 
 ## Ce que le service voit, ce qu'il ne voit pas
 
+La liste exacte de ce qui est stocké est aussi affichée dans l'outil (*Réglages* › « Collecte automatique ») et aux invités, dans leur langue (accueil du formulaire, puis avant la case d'accord). Elle suit vos réglages : les photos du permis n'y figurent que si vous les exigez ou si l'invité peut les joindre.
+
 - Il ne détient **aucune clé** : il ne peut lire ni les identités, ni les permis, ni les trajets. Il garde des enveloppes opaques.
 - Il voit l'heure de chaque dépôt, sa taille et l'adresse IP de l'expéditeur, comme tout serveur web.
 - **Déposer** est ouvert à toute personne qui connaît l'adresse du service (c'est le principe : les invités n'ont pas de compte). Le service n'accepte que des enveloppes de la bonne forme, de 6 Mo au plus. Quelqu'un qui connaîtrait l'adresse pourrait y déposer du bruit : ce serait du chiffré sans valeur, que votre outil écarte comme illisible. Le mot de passe des invités reste un filtre, pas une serrure.

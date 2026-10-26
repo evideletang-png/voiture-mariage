@@ -16,7 +16,7 @@ Pour tester chez vous : `python3 serve.py` dans ce dossier, puis http://localhos
 
 1. **Vous** ouvrez l'adresse, remplissez l'événement, choisissez une phrase de passe, téléchargez le fichier de clé et rangez-le.
 2. Onglet **Réglages** : copiez le lien invités, le mot de passe qui l'accompagne et notez l'empreinte de clé. Envoyez les trois aux invités, le mot de passe de préférence dans un second message.
-3. **Chaque invité** ouvre le lien, saisit le mot de passe, choisit sa langue, remplit le formulaire, puis son navigateur chiffre le dossier. Sans collecte automatique, il produit un fichier `.txt` qu'il vous envoie (partage direct sur mobile, e-mail, WhatsApp…). Avec, le dossier part tout seul vers votre service et l'invité voit « C'est bien reçu ».
+3. **Chaque invité** ouvre le lien, saisit le mot de passe, choisit sa langue, remplit le formulaire, puis son navigateur chiffre le dossier. Sans collecte automatique, il produit un fichier `.txt` qu'il vous envoie (partage direct sur mobile, e-mail, WhatsApp…). Avec, le dossier part tout seul vers votre service et l'invité voit « C'est bien reçu ». La liste de ce qui est stocké en ligne est écrite noir sur blanc, dans les 5 langues, à l'accueil du formulaire (encart repliable « Ce qui est stocké en ligne ») et juste avant la case d'accord, et dans la carte des Réglages.
 4. **Vous** déverrouillez l'outil : avec la collecte automatique, les dossiers sont déjà là (vérification à l'ouverture, puis toutes les 2 minutes) ; sinon, importez les fichiers (onglet Invités). Les alertes signalent jeunes conducteurs, permis récents ou expirés, dates incohérentes.
 5. Onglet **Voitures** : regroupez ceux qui partagent. Le loueur facture par véhicule.
 6. Onglet **Export** :
